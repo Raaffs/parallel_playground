@@ -38,8 +38,8 @@ const (
 type Envelope struct {
 	Type        MessageType `json:"messageType"`
 	Origin      string      `json:"origin"`
-	ForwardedBy ID          `json:"ID"`
-	Target      ID
+	ForwardedBy ID          `json:"forwardedBy"`
+	Target      ID			`json:"targetID"`
 	Raw         json.RawMessage `json:"raw"`
 }
 
@@ -119,8 +119,6 @@ func (n *Node) PrepareMessage(Type MessageType, Target ID, Origin string) *Envel
 
 func (n *Node) handleIncomingConnection(conn net.Conn) {
 	var env Envelope
-	defer conn.Close()
-
 	if err := json.NewDecoder(conn).Decode(&env); err != nil {
 		fmt.Printf("Node %s unable to decode connection json : %v\n", n.ID, err)
 		return
@@ -135,9 +133,10 @@ func (n *Node) handleIncomingConnection(conn net.Conn) {
 		fmt.Println("Handling STORE response: acknowledgment received")
 
 	case FIND_VALUE_REQ, FIND_NODE_REQ:
-		fmt.Println("Handling FIND_VALUE request: searching for file hash")
+		go n.FindFileOrClosestPeer(env, conn)
 
 	case FIND_VALUE_RES:
+
 		fmt.Println("Handling FIND_VALUE response: updating shortlist / file received")
 
 	case FIND_NODE_RES:
@@ -148,12 +147,64 @@ func (n *Node) handleIncomingConnection(conn net.Conn) {
 	}
 }
 
-func (n *Node) FindFileOrClosestPeer(req Envelope) {
-	conn, err := net.Dial("tcp", req.Origin)
-	if err != nil {
-		fmt.Printf("Node %s had error while opening connection to node %s while sending back the file : %v\n", n.ID, req.Origin, err)
+func (n *Node)RequestFile(target ID){
+	bucketIndex := n.findClosestBucket(target)
+	if bucketIndex == -1 {
 		return
 	}
+	peer := n.FindClosestPeerInBucket(bucketIndex, target)
+	addr := n.getPeerAddr(peer)
+	
+	for{
+		conn,err:=net.Dial("tcp",addr);if err!=nil{
+			//will write log later
+			return 
+		}
+		env:=Envelope{Type: FIND_NODE_REQ, Origin: n.addr, Target: target}
+		if err:=json.NewEncoder(conn).Encode(&env);err!=nil{
+			//write logggggg
+			return 
+		}
+
+		var resp Envelope
+
+		if err:=json.NewDecoder(conn).Decode(&resp);err!=nil{
+			//log later
+			return
+		}
+
+		switch resp.Type{
+		case FIND_NODE_REQ:
+			//need to query that node
+			var nextHopAddr string 
+			if err:=json.Unmarshal(resp.Raw,&nextHopAddr);err!=nil{
+				//log
+				return 
+			}
+			if nextHopAddr==addr {
+				//our peer is dumb moron
+				return 
+			}
+			addr=nextHopAddr
+			fmt.Printf("Hopping to next closer peer address: %s\n", addr)
+		case FIND_VALUE_RES:
+			//found the file, store it in map
+			var file File 
+			if err:=json.Unmarshal(resp.Raw,&file);err!=nil{
+				//log
+				return 
+			}
+			n.mu.Lock()
+			n.AvailableData[file.ID]=file.Content
+			n.mu.Unlock()
+			return 
+		default:
+			//what a useless node? 
+		}
+	}
+}
+
+func (n *Node) FindFileOrClosestPeer(req Envelope, conn net.Conn) {
 	defer conn.Close()
 	n.mu.Lock()
 
@@ -272,7 +323,7 @@ func (n *Node) FindClosestPeerInBucket(index int, file ID) ID {
 		}
 		return bytes.Compare(distA[:], distB[:])
 	})
-	//actual k-dht returns 20 closest peers but for this code
+	//actual k-dht returns 20 nearest peers but for this program
 	//we're only returning the 1st one
 	return peers[0]
 }
