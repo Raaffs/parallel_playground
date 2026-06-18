@@ -172,7 +172,44 @@ func main() {
         numMessages := len(node.knowData)
         
         fmt.Printf("[%s] has %d message(s) in its data pool.\n", node.ID, numMessages)
-        for id, msg := range node.knowData {
+        for id, msg := 
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		range node.knowData {
+			
             fmt.Printf("   -> Msg ID: %s | Origin: %s | Value: %q\n", id[:8] + "...", msg.Origin, msg.Value)
         }
         node.mu.Unlock()
